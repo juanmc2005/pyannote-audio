@@ -25,7 +25,7 @@
 
 # AUTHORS
 # Hervé BREDIN - http://herve.niderb.fr
-# Juan Manuel CORIA
+# Juan Manuel CORIA - https://juanmc2005.github.io
 
 import torch
 from .base import RepresentationLearning

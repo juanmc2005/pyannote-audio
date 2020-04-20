@@ -33,11 +33,14 @@ import numpy as np
 
 from typing import Text
 from typing import Optional
-from pyannote.audio.embedding.generators import SpeechSegmentGenerator
+from pyannote.audio.embedding.generators import SpeechSegmentGenerator, LifelongBatchGenerator
 from pyannote.audio.features import FeatureExtraction
 from pyannote.database.protocol.protocol import Protocol
 from pyannote.audio.features.wrapper import Wrappable
 from pyannote.audio.train.task import Task, TaskType, TaskOutput
+from pyannote.database import get_protocol
+from pyannote.audio.features.utils import get_audio_duration
+from pyannote.database.util import FileFinder
 
 
 class RepresentationLearning(Trainer):
@@ -190,6 +193,159 @@ class RepresentationLearning(Trainer):
             agg_y = batch["y"]
 
         return agg_fX, agg_y
+
+    def to_numpy(self, tensor):
+        """Convert torch.Tensor to numpy array"""
+        cpu = torch.device("cpu")
+        return tensor.detach().to(cpu).numpy()
+
+    @property
+    def task(self):
+        return Task(type=TaskType.REPRESENTATION_LEARNING, output=TaskOutput.VECTOR)
+
+
+class SelfSupervisedRepresentationLearning(Trainer):
+    """
+
+    Parameters
+    ----------
+    duration : float, optional
+        Chunks duration, in seconds. Defaults to 1.
+    min_duration : float, optional
+        When provided, use chunks of random duration between `min_duration` and
+        `duration` for training. Defaults to using fixed duration chunks.
+    per_segment : `int`
+        Number of batches to build for each annotation.
+    negatives : `int`
+        Number of negative chunks to draw per annotation from consecutive annotations.
+    batch_size : `int`
+        Target batch size (> 2 * negatives + 2).
+        If not enough negatives can be drawn to fill the specified size
+        (or the minimum size), negatives are drawn from a fallback protocol.
+    per_epoch : `float`, optional
+        Force total audio duration per epoch, in days.
+        Defaults to total duration of protocol subset.
+    fallback_protocol : `str`
+        The full name of the protocol to use as fallback.
+        Ex. 'VoxCeleb.SpeakerVerification.VoxCeleb2'
+    fallback_subset : `Subset` {'train', 'development', 'test'}
+        The subset to use from the fallback protocol.
+    """
+
+    def __init__(
+        self,
+        duration: float = 1.0,
+        min_duration: float = None,
+        per_segment: int = 3,
+        negatives: int = 10,
+        batch_size: int = None,
+        per_epoch: Optional[float] = None,
+        fallback_protocol: str = None,
+        fallback_subset: str = 'train'
+    ):
+
+        super().__init__()
+        self.duration = duration
+        self.min_duration = min_duration
+        self.per_segment = per_segment
+        self.negatives = negatives
+        self.batch_size = batch_size
+        self.per_epoch = per_epoch
+        self.fallback_subset = fallback_subset
+        # TODO how to add augmentation to this protocol?
+        self.fallback_protocol = get_protocol(fallback_protocol,
+                                              preprocessors={
+                                                  'audio': FileFinder(),
+                                                  'duration': get_audio_duration})
+
+    def get_batch_generator(
+        self,
+        feature_extraction: Wrappable,
+        protocol: Protocol,
+        subset: Text = "train",
+        **kwargs
+    ) -> SpeechSegmentGenerator:
+        """Get batch generator
+
+        Parameters
+        ----------
+        feature_extraction : `FeatureExtraction`
+        protocol : `Protocol`
+        subset : {'train', 'development', 'test'}, optional
+
+        Returns
+        -------
+        generator : `SpeechSegmentGenerator`
+        """
+
+        return LifelongBatchGenerator(
+            feature_extraction,
+            protocol,
+            self.fallback_protocol,
+            self.per_segment,
+            self.negatives,
+            self.min_duration,
+            self.duration,
+            self.per_epoch,
+            self.batch_size,
+            subset,
+            self.fallback_subset
+        )
+
+    @property
+    def max_distance(self):
+        if self.metric == "cosine":
+            return 2.0
+        elif self.metric == "angular":
+            return np.pi
+        elif self.metric == "euclidean":
+            # FIXME. incorrect if embedding are not unit-normalized
+            return 2.0
+        else:
+            msg = "'metric' must be one of {'euclidean', 'cosine', 'angular'}."
+            raise ValueError(msg)
+
+    def pdist(self, fX):
+        """Compute pdist à-la scipy.spatial.distance.pdist
+
+        Parameters
+        ----------
+        fX : (n, d) torch.Tensor
+            Embeddings.
+
+        Returns
+        -------
+        distances : (n * (n-1) / 2,) torch.Tensor
+            Condensed pairwise distance matrix
+        """
+
+        if self.metric == "euclidean":
+            return F.pdist(fX)
+
+        elif self.metric in ("cosine", "angular"):
+
+            distance = 0.5 * torch.pow(F.pdist(F.normalize(fX)), 2)
+            if self.metric == "cosine":
+                return distance
+
+            return torch.acos(torch.clamp(1.0 - distance, -1 + 1e-12, 1 - 1e-12))
+
+    def embed(self, batch):
+        """Extract embeddings
+
+        Parameters
+        ----------
+        batch : `dict`
+            ['X'] (batch_size, n_features) `np.ndarray`
+
+        Returns
+        -------
+        fX : (batch_size, n_dimensions) `torch.Tensor`
+        """
+
+        X = torch.tensor(batch["X"], dtype=torch.float32, device=self.device_)
+        fX = self.model_(X)
+        return fX
 
     def to_numpy(self, tensor):
         """Convert torch.Tensor to numpy array"""

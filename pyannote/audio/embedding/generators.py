@@ -25,19 +25,19 @@
 
 # AUTHORS
 # Hervé BREDIN - http://herve.niderb.fr
+# Juan Manuel CORIA - https://juanmc2005.github.io
 
 from typing import Optional
 from typing import Text
-from pyannote.database.protocol.protocol import Protocol
+from pyannote.database.protocol.protocol import Protocol, ProtocolFile
 import itertools
 import numpy as np
-from pyannote.core import Segment
+from pyannote.core import Segment, Timeline
 from pyannote.core.utils.random import random_segment
 from pyannote.core.utils.random import random_subsegment
 from pyannote.audio.train.task import Task, TaskType, TaskOutput
-from ..train.generator import BatchGenerator
+from ..train.generator import BatchGenerator, Subset
 from pyannote.audio.features.wrapper import Wrapper, Wrappable
-from pyannote.audio.train.task import Task
 
 
 class SpeechSegmentGenerator(BatchGenerator):
@@ -275,6 +275,224 @@ class SpeechSegmentGenerator(BatchGenerator):
         return {
             "X": {"dimension": self.feature_extraction.dimension},
             "y": {"classes": self.segment_labels_},
+            "task": Task(
+                type=TaskType.REPRESENTATION_LEARNING, output=TaskOutput.VECTOR
+            ),
+        }
+
+
+def random_chunks(segment: Segment, duration: float, n: int):
+    """Draw `n` random chunks of `duration` from a specific `segment`
+
+    :param segment: a Segment
+    :param duration: chunk duration
+    :param n: number of chunks to draw
+    :return: an iterator over `n` random chunks in `segment`
+    """
+    return itertools.islice(random_subsegment(segment, duration), n)
+
+
+class LifelongBatchGenerator(BatchGenerator):
+
+    def __init__(self,
+                 feature_extraction: Wrappable,
+                 protocol: Protocol,
+                 fallback_protocol: Protocol,
+                 per_segment: int,
+                 negatives: int,
+                 min_duration: float,
+                 max_duration: float,
+                 per_epoch: float = None,
+                 batch_size: int = None,
+                 subset: Subset = 'train',
+                 fallback_subset: Subset = 'train'):
+        """A speech chunk batch generator for a lifelong step with a single file.
+
+        :param feature_extraction: a FeatureExtraction-compatible object
+        :param protocol: a Protocol to draw files
+        :param fallback_protocol: a Protocol to fill batches when
+            there aren't enough samples for a batch
+        :param per_segment: number of batches to build per segment
+        :param negatives: number of negative samples
+            to draw from consecutive segments
+        :param min_duration: minimum chunk duration
+        :param max_duration: maximum chunk duration
+        :param per_epoch: epoch duration in days
+        :param batch_size: optional, it cannot be less than `2 * negatives + 2`.
+            It will fill batches to match this size with negatives from the fallback protocol.
+            Defaults to the minimum value.
+        :param subset: a protocol subset ('train', 'development', 'test')
+        """
+        super().__init__(feature_extraction, protocol, subset)
+        self.feature_extraction = Wrapper(feature_extraction)
+        self.per_segment = per_segment
+        self.n_neg = negatives
+        self.min_duration = min_duration
+        self.max_duration = max_duration
+        self.target_batch_size = batch_size
+
+        self.data_, total_duration = self.load_metadata(protocol, subset)
+        if per_epoch is None:
+            per_epoch = total_duration / (24 * 60 * 60)
+        self.per_epoch = per_epoch
+
+        self.fallback_generator = SpeechSegmentGenerator(feature_extraction,
+                                                         fallback_protocol,
+                                                         subset=fallback_subset,
+                                                         per_label=1,
+                                                         per_turn=1,
+                                                         per_fold=1,
+                                                         duration=max_duration)
+
+    def load_metadata(self, protocol: Protocol, subset: Subset):
+        """Load all protocol files and return total speech duration.
+
+        :param protocol: a Protocol instance
+        :param subset: a Subset ('train', 'development', 'test')
+        :return: a tuple
+            - data: list of protocol files in the original order
+            - total_duration: the total usable speech duration
+        """
+        total_duration = 0
+        data = []
+        for file in getattr(protocol, subset)():
+            total_duration += sum([s.duration
+                                   for s in file['annotated']
+                                   if s.duration > self.max_duration])
+            data.append(file)
+        return data, total_duration
+
+    def samples(self):
+        """Iterate endlessly over files (in order)
+           and segments (randomly), drawing probable
+           positive and negative chunks for a self-supervised objective
+
+        :return: an iterator over samples
+        """
+        while True:
+            # don't shuffle files because lifelong learning is sequential
+            for file in self.data_:
+                segments = file['annotated']
+                # shuffle segments
+                chosen = np.random.choice(len(segments), size=len(segments))
+                for i in chosen:
+                    # skip segments shorter than maximum chunk duration
+                    if segments[i].duration <= self.max_duration:
+                        continue
+                    # build `per_segment` batches for this segment
+                    for _ in range(self.per_segment):
+                        for sample in self.batch_samples(file, segments, i):
+                            yield sample
+
+    def batch_samples(self, file: ProtocolFile, segments: Timeline, i: int):
+        """Draw positive and negative samples to form a batch
+           for the given file and segment.
+           If not enough negatives can be approximated to fill
+           the batch, then complete with the fallback protocol.
+
+        :param file: a ProtocolFile
+        :param segments: a Timeline with all available segments
+        :param i: index corresponding to the segment to use for positives
+        :return: an iterator over samples until `batch_size` is reached
+        """
+        # choose next batch's duration randomly
+        duration = self.min_duration + np.random.rand() * (self.max_duration - self.min_duration)
+
+        # choose 2 random positive chunks
+        yield self.package(file, next(random_subsegment(segments[i], duration)))
+        yield self.package(file, next(random_subsegment(segments[i], duration)))
+
+        # count samples in batch
+        yielded = 2
+
+        # choose random negative chunks from previous segment if possible
+        if i > 0 and segments[i-1].duration > self.max_duration:
+            for chunk in random_chunks(segments[i-1], duration, self.n_neg):
+                yield self.package(file, chunk)
+                yielded += 1
+
+        # choose random negative chunks from next segment if possible
+        if i < len(segments) - 1 and segments[i+1].duration > self.max_duration:
+            for chunk in random_chunks(segments[i+1], duration, self.n_neg):
+                yield self.package(file, chunk)
+                yielded += 1
+
+        # complete batch with fallback protocol
+        if yielded < self.batch_size:
+            # HACK: change generator's duration to force the one we want
+            # HACK: this should be fixed properly by refactoring common code
+            # FIXME crop fixed length segment
+            self.fallback_generator.duration = duration
+            while yielded < self.batch_size:
+                sample = next(self.fallback_generator.samples())
+                yield self.package_fallback(sample)
+                yielded += 1
+
+    def package(self, file: ProtocolFile, chunk: Segment):
+        """Package a sample in the expected dictionary format.
+           Note that a `y` key is not provided as the identity
+           of the speaker is not known.
+
+        :param file: a ProtocolFile instance
+        :param chunk: the chunk to package
+        :return: a dict of
+            - X: extracted features for `chunk`
+        """
+        feat = self.feature_extraction.crop(file, chunk,
+                                            mode='center',
+                                            fixed=chunk.duration)
+        return {'X': feat}
+
+    def package_fallback(self, sample: dict):
+        """Package a sample from the fallback protocol.
+           This is different than a chunk generated by this class
+           because we receive an already packaged sample that
+           needs to be reformatted with only the `X` key.
+
+        :param sample: a single sample batch packaged in a dict
+            with shape (1, dim)
+        :return: a dict of
+            - X: X value of the actual sample with shape (dim,)
+        """
+        return {'X': sample['X'].squeeze()}
+
+    @property
+    def batch_size(self) -> int:
+        """Lazily calculate the batch size for this generator.
+           An imposed minimum for the size is `2 * n_neg + 2`.
+           Although this is not strictly speaking a minimum, it
+           is what's recommended, as many negatives are needed
+           in a contrastive self-supervised objective.
+
+        :return: the batch size
+        """
+        minimum = 2 * self.n_neg + 2
+        if self.target_batch_size is None or self.target_batch_size < minimum:
+            return minimum
+        else:
+            return self.target_batch_size
+
+    @property
+    def batches_per_epoch(self) -> int:
+        """Lazily calculate the number of batches per epoch.
+
+        :return: the number of batches per epoch
+        """
+        # duration per epoch
+        duration_per_epoch = self.per_epoch * 24 * 60 * 60
+        # (average) duration per batch
+        duration_per_batch = 0.5 * (self.min_duration + self.max_duration) * self.batch_size
+        # number of batches per epoch
+        return int(np.ceil(duration_per_epoch / duration_per_batch))
+
+    @property
+    def specifications(self):
+        """Lazily calculate the specifications for a batch.
+
+        :return: a dict describing a batch
+        """
+        return {
+            "X": {"dimension": self.feature_extraction.dimension},
             "task": Task(
                 type=TaskType.REPRESENTATION_LEARNING, output=TaskOutput.VECTOR
             ),

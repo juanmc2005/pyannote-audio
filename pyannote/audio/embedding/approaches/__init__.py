@@ -25,7 +25,7 @@
 
 # AUTHORS
 # Hervé BREDIN - http://herve.niderb.fr
-# Juan Manuel CORIA
+# Juan Manuel CORIA - https://juanmc2005.github.io
 
 
 from .classification import Classification
@@ -34,3 +34,4 @@ from .arcface_loss import AdditiveAngularMarginLoss
 from .coco_loss import CongenerousCosineLoss
 from .contrastive_loss import ContrastiveLoss
 from .center_loss import CenterLoss
+from .info_nce import InfoNCELoss
