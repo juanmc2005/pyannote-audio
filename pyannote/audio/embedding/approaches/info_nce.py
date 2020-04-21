@@ -82,7 +82,8 @@ class InfoNCELoss(SelfSupervisedRepresentationLearning):
                  batch_size: int = None,
                  per_epoch: float = None,
                  fallback_protocol: str = None,
-                 fallback_subset: Subset = 'train'):
+                 fallback_subset: Subset = 'train',
+                 **kwargs):
         super().__init__(
             duration=duration,
             min_duration=min_duration,
@@ -113,18 +114,18 @@ class InfoNCELoss(SelfSupervisedRepresentationLearning):
         fX = self.embed(batch)
 
         # calculate the similarity between the first examples and the rest
-        cos1 = F.cosine_similarity(fX[0].unsqueeze(0), fX[1:])
-        cos2 = F.cosine_similarity(fX[1].unsqueeze(0), fX[2:])
-        cos2 = torch.cat((cos1[0].reshape(1), cos2))
-        cos = torch.stack((cos1, cos2))
+        cos = F.cosine_similarity(fX[0].unsqueeze(0), fX[1:])
+        # cos2 = F.cosine_similarity(fX[1].unsqueeze(0), fX[2:])
+        # cos2 = torch.cat((cos1[0].reshape(1), cos2))
+        # cos = torch.stack((cos1, cos2))
 
         # first similarity is a positive, the rest are negatives.
         # the 'correct' answer is the positive similarity, so it is
         # maximized, while the rest is minimized
-        y = torch.tensor([0, 0]).to(self.device_)
+        y = torch.tensor([0]).to(self.device_)
 
         # calculate logits
-        logits = F.log_softmax(cos, dim=1)
+        logits = F.log_softmax(cos.unsqueeze(0), dim=1)
 
         # calculate loss
         loss = self.loss_(logits, y)
