@@ -68,6 +68,9 @@ class SpeechSegmentGenerator(BatchGenerator):
     label_min_duration : float, optional
         Remove speakers with less than `label_min_duration` seconds of speech.
         Defaults to 0 (i.e. keep it all).
+    label_max_duration : float, optional
+        Remove speakers with more than `label_max_duration` seconds of speech.
+        Defaults to np.inf (i.e. keep it all).
     """
 
     def __init__(
@@ -82,6 +85,7 @@ class SpeechSegmentGenerator(BatchGenerator):
         per_fold: Optional[int] = None,
         per_epoch: float = None,
         label_min_duration: float = 0.0,
+        label_max_duration : float = np.inf
     ):
 
         self.feature_extraction = Wrapper(feature_extraction)
@@ -91,6 +95,7 @@ class SpeechSegmentGenerator(BatchGenerator):
         self.duration = duration
         self.min_duration = duration if min_duration is None else min_duration
         self.label_min_duration = label_min_duration
+        self.label_max_duration = label_max_duration
         self.weighted_ = True
 
         total_duration = self._load_metadata(protocol, subset=subset)
@@ -170,12 +175,15 @@ class SpeechSegmentGenerator(BatchGenerator):
                 datum = (segments, duration, current_file)
                 self.data_.setdefault(label, []).append(datum)
 
-        # remove labels with less than 'label_min_duration' of speech
-        # otherwise those may generate the same segments over and over again
+        # remove labels with less (resp. more) than 'label_min_duration'
+        # (resp. `label_max_duration`) of speech otherwise those may generate the
+        # same segments over and over again (resp. useful to get rare speakers
+        # which are likely different than a given speaker of the same dataset)
         dropped_labels = set()
         for label, data in self.data_.items():
             total_duration = sum(datum[1] for datum in data)
-            if total_duration < self.label_min_duration:
+            if total_duration < self.label_min_duration or \
+               total_duration > self.label_max_duration:
                 dropped_labels.add(label)
 
         for label in dropped_labels:

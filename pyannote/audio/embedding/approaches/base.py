@@ -65,6 +65,9 @@ class RepresentationLearning(Trainer):
     label_min_duration : `float`, optional
         Remove speakers with less than that many seconds of speech.
         Defaults to 0 (i.e. keep them all).
+    label_max_duration : float, optional
+        Remove speakers with more than `label_max_duration` seconds of speech.
+        Defaults to np.inf (i.e. keep it all).
     """
 
     def __init__(
@@ -76,6 +79,7 @@ class RepresentationLearning(Trainer):
         per_fold: Optional[int] = None,
         per_epoch: Optional[float] = None,
         label_min_duration: float = 0.0,
+        label_max_duration : float = np.inf
     ):
 
         super().__init__()
@@ -86,6 +90,7 @@ class RepresentationLearning(Trainer):
         self.per_fold = per_fold
         self.per_epoch = per_epoch
         self.label_min_duration = label_min_duration
+        self.label_max_duration = label_max_duration
 
     def get_batch_generator(
         self,
@@ -118,6 +123,7 @@ class RepresentationLearning(Trainer):
             per_fold=self.per_fold,
             per_epoch=self.per_epoch,
             label_min_duration=self.label_min_duration,
+            label_max_duration = self.label_max_duration
         )
 
     @property
