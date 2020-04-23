@@ -113,6 +113,16 @@ class SelfSupervisedBatchGenerator(BatchGenerator):
     def new_duration(self):
         return self.min_duration + np.random.rand() * (self.max_duration - self.min_duration)
 
+    def is_previous_valid(self, segments: Timeline, i: int) -> bool:
+        return i > 0 \
+               and segments[i].start - segments[i-1].end > 0 \
+               and segments[i-1].duration > self.max_duration
+
+    def is_next_valid(self, segments: Timeline, i: int) -> bool:
+        return i < len(segments) - 1 \
+               and segments[i+1].start - segments[i].end > 0 \
+               and segments[i+1].duration > self.max_duration
+
     def package(self, file: ProtocolFile, chunk: Segment):
         """Package a sample in the expected dictionary format.
            Note that a `y` key is a placeholder, as the identity
@@ -243,12 +253,12 @@ class MutualInformationBatchGenerator(SelfSupervisedBatchGenerator):
         """
         while True:
             # shuffle files
-            files_chosen = np.random.choice(len(self.data_), size=len(self.data_))
+            files_chosen = np.random.permutation(len(self.data_))
             for i in files_chosen:
                 file = self.data_[i]
-                segments = file['annotated']
+                segments = file['annotation'].get_timeline(copy=False)
                 # shuffle segments
-                chosen = np.random.choice(len(segments), size=len(segments))
+                chosen = np.random.permutation(len(segments))
                 for j in chosen:
                     # skip segments shorter than maximum chunk duration
                     if segments[j].duration <= self.max_duration:
@@ -280,13 +290,13 @@ class MutualInformationBatchGenerator(SelfSupervisedBatchGenerator):
         yielded = 2
 
         # choose random negative chunks from previous segment if possible
-        if i > 0 and segments[i-1].duration > self.max_duration:
+        if self.is_previous_valid(segments, i):
             for chunk in random_chunks(segments[i-1], duration, self.n_neg):
                 yield self.package(file, chunk)
                 yielded += 1
 
         # choose random negative chunks from next segment if possible
-        if i < len(segments) - 1 and segments[i+1].duration > self.max_duration:
+        if self.is_next_valid(segments, i):
             for chunk in random_chunks(segments[i+1], duration, self.n_neg):
                 yield self.package(file, chunk)
                 yielded += 1
@@ -357,12 +367,12 @@ class ContrastiveBatchGenerator(SelfSupervisedBatchGenerator):
         duration = self.new_duration()
         while True:
             # shuffle files
-            files_chosen = np.random.choice(len(self.data_), size=len(self.data_))
+            files_chosen = np.random.permutation(len(self.data_))
             for i in files_chosen:
                 file = self.data_[i]
-                segments = file['annotated']
+                segments = file['annotation'].get_timeline(copy=False)
                 # shuffle segments
-                segments_chosen = np.random.choice(len(segments), size=len(segments))
+                segments_chosen = np.random.permutation(len(segments))
                 for j in segments_chosen:
                     # skip segments shorter than maximum chunk duration
                     if segments[j].duration <= self.max_duration:
@@ -381,12 +391,10 @@ class ContrastiveBatchGenerator(SelfSupervisedBatchGenerator):
         for chunk in random_chunks(segments[j], duration, self.per_label):
             yield self.package(file, chunk)
 
-        # if j is not the last, yield negatives from the next segment
-        if j < len(segments) - 1 and segments[j+1].duration > self.max_duration:
+        if self.is_next_valid(segments, j):
             for chunk in random_chunks(segments[j+1], duration, self.per_label):
                 yield self.package(file, chunk)
-        # if j is not the first, yield negatives from the previous segment
-        elif j > 0 and segments[j-1].duration > self.max_duration:
+        elif self.is_previous_valid(segments, j):
             for chunk in random_chunks(segments[j-1], duration, self.per_label):
                 yield self.package(file, chunk)
         # otherwise yield negatives from the fallback protocol

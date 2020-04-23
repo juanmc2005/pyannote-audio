@@ -168,17 +168,17 @@ class InfoNCELoss(RepresentationLearning):
         fX, _ = self.embed(batch)
 
         # calculate the similarity between the first examples and the rest
-        cos1 = F.cosine_similarity(fX[0].unsqueeze(0), fX[1:])
-        cos2 = F.cosine_similarity(fX[1].unsqueeze(0), fX[2:])
-        cos2 = torch.cat((cos1[0].reshape(1), cos2))
-        cos = torch.stack((cos1, cos2))
+        cos = F.cosine_similarity(fX[0].unsqueeze(0), fX[1:])
+        # cos2 = F.cosine_similarity(fX[1].unsqueeze(0), fX[2:])
+        # cos2 = torch.cat((cos1[0].reshape(1), cos2))
+        # cos = torch.stack((cos1, cos2))
 
         # format ground truth, which should be [0, 0],
         # as the first similarity is the one to maximize
-        y = torch.tensor([0, 0]).to(self.device_)
+        y = torch.tensor([0]).to(self.device_)
 
         # calculate logits
-        logits = F.log_softmax(cos, dim=1)
+        logits = F.log_softmax(cos.unsqueeze(0), dim=1)
 
         # calculate loss
         loss = self.loss_(logits, y)
