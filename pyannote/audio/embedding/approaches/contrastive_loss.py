@@ -29,6 +29,15 @@
 
 import torch
 from .base import RepresentationLearning
+from pyannote.audio.train.generator import Subset
+from pyannote.audio.train.generator import BatchGenerator
+from pyannote.audio.embedding.generators import ContrastiveBatchGenerator
+from pyannote.database.protocol.protocol import Protocol
+from pyannote.audio.features.wrapper import Wrappable
+from pyannote.database import get_protocol
+from pyannote.audio.features.utils import get_audio_duration
+from pyannote.database.util import FileFinder
+from pyannote.core.utils.distance import to_condensed
 
 
 class ContrastiveLoss(RepresentationLearning):
@@ -142,3 +151,115 @@ class ContrastiveLoss(RepresentationLearning):
         loss = losses / dist.size(0)
 
         return {"loss": loss, "loss_contrastive": loss}
+
+
+class SelfSupervisedContrastiveLoss(RepresentationLearning):
+
+    def __init__(
+            self,
+            duration: float = 1.0,
+            min_duration: float = None,
+            per_label: int = 1,
+            per_fold: int = 32,
+            per_epoch: float = None,
+            label_min_duration: float = 0.0,
+            # FIXME create a Literal type for metric
+            # FIXME maybe in pyannote.core.utils.distance
+            metric: str = "cosine",
+            # FIXME homogeneize the meaning of margin parameter
+            # FIXME it has a different meaning in ArcFace, right?
+            margin: float = 0.2,
+            fallback_protocol: str = None,
+            fallback_subset: Subset = 'train',
+            **kwargs
+    ):
+        super().__init__(
+            duration=duration,
+            min_duration=min_duration,
+            per_turn=1,
+            per_label=per_label,
+            per_fold=per_fold,
+            per_epoch=per_epoch,
+            label_min_duration=label_min_duration,
+        )
+
+        self.metric = metric
+        self.margin = margin
+        # FIXME see above
+        self.margin_ = self.margin * self.max_distance
+        self.fallback_subset = fallback_subset
+        self.i_positive, self.i_negative = None, None
+        # TODO how to add augmentation to this protocol?
+        self.fallback_protocol = get_protocol(fallback_protocol,
+                                              preprocessors={
+                                                  'audio': FileFinder(),
+                                                  'duration': get_audio_duration})
+
+    def positive_indices(self, batch_size: int) -> list:
+        positives = []
+        for i in range(0, batch_size, self.per_label):
+            for j in range(i + 1, i + self.per_label):
+                positives.append(to_condensed(batch_size, i, j))
+        return positives
+
+    def negative_indices(self, batch_size: int) -> list:
+        negatives = []
+        step = 2 * self.per_label
+        for i in range(0, batch_size - step, step):
+            for j in range(i, i + self.per_label):
+                for k in range(i + self.per_label, i + step):
+                    negatives.append(to_condensed(batch_size, j, k))
+        return negatives
+
+    def get_batch_generator(
+        self,
+        feature_extraction: Wrappable,
+        protocol: Protocol,
+        subset: Subset = "train",
+        **kwargs
+    ) -> BatchGenerator:
+        generator = ContrastiveBatchGenerator(
+            feature_extraction,
+            protocol,
+            self.fallback_protocol,
+            self.min_duration,
+            self.duration,
+            self.per_label,
+            self.per_fold,
+            self.per_epoch,
+            subset,
+            self.fallback_subset)
+        # we can safely initialize positive and negative indices here
+        # because the batch generator is needed to calculate the first batch's loss
+        self.i_positive = self.positive_indices(generator.batch_size)
+        self.i_negative = self.negative_indices(generator.batch_size)
+        return generator
+
+    def batch_loss(self, batch):
+        """Compute loss for current `batch`
+
+        Parameters
+        ----------
+        batch : `dict`
+            ['X'] (`numpy.ndarray`)
+            ['y'] (`numpy.ndarray`)
+
+        Returns
+        -------
+        batch_loss : `dict`
+            ['loss'] (`torch.Tensor`) : Triplet loss
+        """
+        # get batch embeddings
+        fX, _ = self.embed(batch)
+
+        # calculate the distances between every sample in the batch
+        dist = self.pdist(fX).to(self.device_)
+
+        # calculate positive losses
+        pos_loss = torch.pow(dist[self.i_positive], 2)
+        # calculate negative losses
+        neg_loss = torch.pow(torch.clamp(self.margin_ - dist[self.i_negative], min=1e-8), 2)
+        # average loss
+        loss = torch.cat((pos_loss, neg_loss)).mean()
+
+        return {"loss": loss}

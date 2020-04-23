@@ -3,7 +3,7 @@
 
 # The MIT License (MIT)
 
-# Copyright (c) 2017-2019 CNRS
+# Copyright (c) 2020 CNRS
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,7 @@
 # SOFTWARE.
 
 # AUTHORS
-# Hervé BREDIN - http://herve.niderb.fr
 # Juan Manuel CORIA - https://juanmc2005.github.io
 
-
-from .classification import Classification
-from .triplet_loss import TripletLoss
-from .arcface_loss import AdditiveAngularMarginLoss
-from .coco_loss import CongenerousCosineLoss
-from .contrastive_loss import ContrastiveLoss, SelfSupervisedContrastiveLoss
-from .center_loss import CenterLoss
-from .info_nce_loss import InfoNCELoss
+from .supervised import SpeechSegmentGenerator
+from .self_supervised import MutualInformationBatchGenerator, ContrastiveBatchGenerator
