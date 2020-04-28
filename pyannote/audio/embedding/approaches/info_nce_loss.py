@@ -112,6 +112,7 @@ class InfoNCELoss(RepresentationLearning):
         self.fallback_subset = fallback_subset
         # TODO how to add augmentation to this protocol?
         self.fallback_protocol = get_protocol(fallback_protocol,
+                                              progress=True,
                                               preprocessors={
                                                   'audio': FileFinder(),
                                                   'duration': get_audio_duration})

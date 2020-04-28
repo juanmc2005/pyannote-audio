@@ -191,6 +191,7 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
         self.i_positive, self.i_negative = None, None
         # TODO how to add augmentation to this protocol?
         self.fallback_protocol = get_protocol(fallback_protocol,
+                                              progress=True,
                                               preprocessors={
                                                   'audio': FileFinder(),
                                                   'duration': get_audio_duration})

@@ -58,7 +58,8 @@ class SelfSupervisedBatchGenerator(BatchGenerator):
                  max_duration: float,
                  per_epoch: float = None,
                  subset: Subset = 'train',
-                 fallback_subset: Subset = 'train'):
+                 fallback_subset: Subset = 'train',
+                 fallback_label_max_duration: float = np.inf):
         """A base speech chunk batch generator class for self-supervised objectives.
 
         :param feature_extraction: a FeatureExtraction-compatible object
@@ -81,13 +82,10 @@ class SelfSupervisedBatchGenerator(BatchGenerator):
             per_epoch = total_duration / (24 * 60 * 60)
         self.per_epoch = per_epoch
 
-        self.fallback_generator = SpeechSegmentGenerator(feature_extraction,
-                                                         fallback_protocol,
-                                                         subset=fallback_subset,
-                                                         per_label=1,
-                                                         per_turn=1,
-                                                         per_fold=1,
-                                                         duration=max_duration)
+        self.fallback_generator = SpeechSegmentGenerator(
+            feature_extraction, fallback_protocol, subset=fallback_subset,
+            per_label=1, per_turn=1, per_fold=1, duration=max_duration,
+            label_max_duration=fallback_label_max_duration)
 
     def load_metadata(self, protocol: Protocol, subset: Subset):
         """Load all protocol files and return total speech duration.
