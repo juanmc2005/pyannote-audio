@@ -35,6 +35,7 @@ from pyannote.audio.train.task import Task, TaskType, TaskOutput
 from pyannote.audio.train.generator import BatchGenerator, Subset
 from pyannote.audio.features.wrapper import Wrapper, Wrappable
 from pyannote.audio.embedding.generators import SpeechSegmentGenerator
+from pyannote.core.utils.distance import to_condensed
 
 
 def random_chunks(segment: Segment, duration: float, n: int):
@@ -407,4 +408,42 @@ class ContrastiveBatchGenerator(SelfSupervisedBatchGenerator):
         # times `per_fold` segments that we look at each time.
         return 2 * self.per_fold * self.per_label
 
+    @property
+    def positive_indices(self) -> list:
+        """Calculate the indices of positive distances in a condensed
+        distance matrix, based on the batch size.
+        This indices can be precalculated thanks to the specific
+        structure given to batches.
 
+        Returns
+        -------
+        positives : `list`
+            Indices of positive distances in a condensed distance matrix
+            for a batch
+        """
+        positives = []
+        for i in range(0, self.batch_size, self.per_label):
+            for j in range(i + 1, i + self.per_label):
+                positives.append(to_condensed(self.batch_size, i, j))
+        return positives
+
+    @property
+    def negative_indices(self) -> list:
+        """Calculate the indices of negative distances in a condensed
+        distance matrix, based on the batch size.
+        This indices can be precalculated thanks to the specific
+        structure given to batches.
+
+        Returns
+        -------
+        negatives : `list`
+            Indices of negative distances in a condensed distance matrix
+            for a batch
+        """
+        negatives = []
+        step = 2 * self.per_label
+        for i in range(0, self.batch_size - step, step):
+            for j in range(i, i + self.per_label):
+                for k in range(i + self.per_label, i + step):
+                    negatives.append(to_condensed(self.batch_size, j, k))
+        return negatives

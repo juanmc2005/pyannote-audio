@@ -37,13 +37,13 @@ from pyannote.audio.features.wrapper import Wrappable
 from pyannote.database import get_protocol
 from pyannote.audio.features.utils import get_audio_duration
 from pyannote.database.util import FileFinder
-from pyannote.core.utils.distance import to_condensed
 
 
 class ContrastiveLoss(RepresentationLearning):
-    """Contrasitve loss
+    """Contrastive loss
 
-    TODO explain
+    Train embeddings by bringing together positive pairs (same speaker)
+    and separating negative pairs (different speaker).
 
     Parameters
     ----------
@@ -74,7 +74,8 @@ class ContrastiveLoss(RepresentationLearning):
 
     Reference
     ---------
-    TODO
+    Dimensionality Reduction by Learning an Invariant Mapping
+    http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
     """
 
     def __init__(
@@ -154,6 +155,44 @@ class ContrastiveLoss(RepresentationLearning):
 
 
 class SelfSupervisedContrastiveLoss(RepresentationLearning):
+    """Contrastive loss for self-supervised applications
+
+    Train embeddings by bringing together positive pairs (same speaker)
+    and separating negative pairs (different speaker).
+    These pairs are approximated using a custom batch generator.
+
+    Parameters
+    ----------
+    duration : float, optional
+        Chunks duration, in seconds. Defaults to 1.
+    min_duration : float, optional
+        When provided, use chunks of random duration between `min_duration` and
+        `duration` for training. Defaults to using fixed duration chunks.
+    per_label : `int`, optional
+        Number of sequences per speaker in each batch. Defaults to 1.
+    per_fold : `int`, optional
+        Number of different speakers per batch. Defaults to 32.
+    per_epoch : `float`, optional
+        Force total audio duration per epoch, in days.
+        Defaults to total duration of protocol subset.
+    label_min_duration : `float`, optional
+        Remove speakers with less than that many seconds of speech.
+        Defaults to 0 (i.e. keep them all).
+    metric : {'euclidean', 'cosine', 'angular'}, optional
+        Defaults to 'cosine'.
+    margin: float, optional
+        Margin multiplicative factor. Defaults to 0.2.
+    fallback_protocol : `str`
+        If not enough negatives can be found by the batch generator, then
+        fill the batch with speech chunks from this protocol.
+    fallback_subset: `Subset`, optional
+        The subset to use from the fallback protocol. Defaults to 'train'.
+
+    Reference
+    ---------
+    Dimensionality Reduction by Learning an Invariant Mapping
+    http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+    """
 
     def __init__(
             self,
@@ -189,28 +228,12 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
         self.margin_ = self.margin * self.max_distance
         self.fallback_subset = fallback_subset
         self.i_positive, self.i_negative = None, None
-        # TODO how to add augmentation to this protocol?
+        # FIXME this might not be the optimal place to create the protocol
         self.fallback_protocol = get_protocol(fallback_protocol,
                                               progress=True,
                                               preprocessors={
                                                   'audio': FileFinder(),
                                                   'duration': get_audio_duration})
-
-    def positive_indices(self, batch_size: int) -> list:
-        positives = []
-        for i in range(0, batch_size, self.per_label):
-            for j in range(i + 1, i + self.per_label):
-                positives.append(to_condensed(batch_size, i, j))
-        return positives
-
-    def negative_indices(self, batch_size: int) -> list:
-        negatives = []
-        step = 2 * self.per_label
-        for i in range(0, batch_size - step, step):
-            for j in range(i, i + self.per_label):
-                for k in range(i + self.per_label, i + step):
-                    negatives.append(to_condensed(batch_size, j, k))
-        return negatives
 
     def get_batch_generator(
         self,
@@ -232,8 +255,8 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
             self.fallback_subset)
         # we can safely initialize positive and negative indices here
         # because the batch generator is needed to calculate the first batch's loss
-        self.i_positive = self.positive_indices(generator.batch_size)
-        self.i_negative = self.negative_indices(generator.batch_size)
+        self.i_positive = generator.positive_indices
+        self.i_negative = generator.negative_indices
         return generator
 
     def batch_loss(self, batch):

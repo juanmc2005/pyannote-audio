@@ -110,7 +110,7 @@ class InfoNCELoss(RepresentationLearning):
         self.negatives = negatives
         self.batch_size = batch_size
         self.fallback_subset = fallback_subset
-        # TODO how to add augmentation to this protocol?
+        # FIXME this might not be the optimal place to create the protocol
         self.fallback_protocol = get_protocol(fallback_protocol,
                                               progress=True,
                                               preprocessors={
