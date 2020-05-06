@@ -311,6 +311,8 @@ class Trainer:
         callbacks : `list` of `Callback` instances
             Add custom callbacks.
         n_jobs : `int`, optional
+            Batch generator will be in the same thread as the training loop
+            if the value of this parameter is 0.
             Defaults to 1.
 
         Yields
@@ -332,9 +334,12 @@ class Trainer:
 
         # BATCH GENERATOR
         self.batch_generator_ = batch_generator
-        self.batches_ = AdaptiveBackgroundGenerator(
-            self.batch_generator_, n_jobs=n_jobs
-        )
+        if n_jobs > 0:
+            self.batches_ = AdaptiveBackgroundGenerator(
+                self.batch_generator_, n_jobs=n_jobs
+            )
+        else:
+            self.batches_ = self.batch_generator_()
         self.batches_per_epoch_ = self.batch_generator_.batches_per_epoch
 
         # OPTIMIZER
@@ -474,4 +479,5 @@ class Trainer:
 
         callbacks.on_train_end(self)
 
-        self.batches_.deactivate()
+        if isinstance(self.batches_, AdaptiveBackgroundGenerator):
+            self.batches_.deactivate()

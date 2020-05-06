@@ -29,6 +29,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from .base import RepresentationLearning
 from pyannote.audio.train.generator import Subset
 from pyannote.audio.train.generator import BatchGenerator
@@ -94,6 +95,7 @@ class InfoNCELoss(RepresentationLearning):
                  per_epoch: float = None,
                  fallback_protocol: str = None,
                  fallback_subset: Subset = 'train',
+                 fallback_label_max_duration: float = np.inf,
                  **kwargs):
         super().__init__(
             duration=duration,
@@ -110,6 +112,7 @@ class InfoNCELoss(RepresentationLearning):
         self.negatives = negatives
         self.batch_size = batch_size
         self.fallback_subset = fallback_subset
+        self.fallback_label_max_duration = fallback_label_max_duration
         # FIXME this might not be the optimal place to create the protocol
         self.fallback_protocol = get_protocol(fallback_protocol,
                                               progress=True,
@@ -148,7 +151,8 @@ class InfoNCELoss(RepresentationLearning):
             self.per_epoch,
             self.batch_size,
             subset,
-            self.fallback_subset
+            self.fallback_subset,
+            self.fallback_label_max_duration
         )
 
     def batch_loss(self, batch):

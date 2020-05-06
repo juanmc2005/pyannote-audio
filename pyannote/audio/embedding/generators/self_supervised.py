@@ -203,7 +203,8 @@ class MutualInformationBatchGenerator(SelfSupervisedBatchGenerator):
                  per_epoch: float = None,
                  batch_size: int = None,
                  subset: Subset = 'train',
-                 fallback_subset: Subset = 'train'):
+                 fallback_subset: Subset = 'train',
+                 fallback_label_max_duration: float = np.inf):
         """A speech segment generator for non-temporal InfoNCE objectives.
         It builds batches with 2 positive examples and N-2 negative ones.
 
@@ -225,7 +226,8 @@ class MutualInformationBatchGenerator(SelfSupervisedBatchGenerator):
         :param subset: a protocol subset ('train', 'development', 'test')
         """
         super().__init__(feature_extraction, protocol, fallback_protocol,
-                         min_duration, max_duration, per_epoch, subset, fallback_subset)
+                         min_duration, max_duration, per_epoch, subset,
+                         fallback_subset, fallback_label_max_duration)
 
         if negatives is None and batch_size is None:
             msg = 'Either `negatives` or `batch_size` needs ' \
@@ -348,9 +350,11 @@ class ContrastiveBatchGenerator(SelfSupervisedBatchGenerator):
                  per_fold: int,
                  per_epoch: float = None,
                  subset: Subset = 'train',
-                 fallback_subset: Subset = 'train'):
+                 fallback_subset: Subset = 'train',
+                 fallback_label_max_duration: float = np.inf):
         super().__init__(feature_extraction, protocol, fallback_protocol,
-                         min_duration, max_duration, per_epoch, subset, fallback_subset)
+                         min_duration, max_duration, per_epoch, subset,
+                         fallback_subset, fallback_label_max_duration)
         self.per_label = per_label
         self.per_fold = per_fold
 

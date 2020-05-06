@@ -28,6 +28,7 @@
 # Juan Manuel CORIA - https://juanmc2005.github.io
 
 import torch
+import numpy as np
 from .base import RepresentationLearning
 from pyannote.audio.train.generator import Subset
 from pyannote.audio.train.generator import BatchGenerator
@@ -210,6 +211,7 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
             margin: float = 0.2,
             fallback_protocol: str = None,
             fallback_subset: Subset = 'train',
+            fallback_label_max_duration: float = np.inf,
             **kwargs
     ):
         super().__init__(
@@ -227,6 +229,7 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
         # FIXME see above
         self.margin_ = self.margin * self.max_distance
         self.fallback_subset = fallback_subset
+        self.fallback_label_max_duration = fallback_label_max_duration
         self.i_positive, self.i_negative = None, None
         # FIXME this might not be the optimal place to create the protocol
         self.fallback_protocol = get_protocol(fallback_protocol,
@@ -252,7 +255,8 @@ class SelfSupervisedContrastiveLoss(RepresentationLearning):
             self.per_fold,
             self.per_epoch,
             subset,
-            self.fallback_subset)
+            self.fallback_subset,
+            self.fallback_label_max_duration)
         # we can safely initialize positive and negative indices here
         # because the batch generator is needed to calculate the first batch's loss
         self.i_positive = generator.positive_indices
