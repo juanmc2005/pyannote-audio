@@ -28,6 +28,8 @@ from .segmentation.overlapped_speech_detection import (  # isort:skip
 
 from .segmentation.speaker_tracking import SpeakerTracking  # isort:skip
 
+from .segmentation.online_speaker_tracking import OnlineSpeakerTracking
+
 from .segmentation.segmentation import Segmentation  # isort:skip
 
 from .embedding.arcface import SupervisedRepresentationLearningWithArcFace  # isort:skip
@@ -40,5 +42,6 @@ __all__ = [
     "SpeakerChangeDetection",
     "OverlappedSpeechDetection",
     "SpeakerTracking",
+    "OnlineSpeakerTracking",
     "SpeakerEmbedding",
 ]
