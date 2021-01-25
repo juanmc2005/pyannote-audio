@@ -137,8 +137,9 @@ class Task(pl.LightningDataModule):
 
     Parameters
     ----------
-    protocol : Protocol
-        pyannote.database protocol
+    protocol : Protocol, optional
+        pyannote.database protocol. It is optional because
+        online tasks might not need it. Defaults to None.
     duration : float, optional
         Chunks duration in seconds. Defaults to two seconds (2.).
     min_duration : float, optional
@@ -172,7 +173,7 @@ class Task(pl.LightningDataModule):
 
     def __init__(
         self,
-        protocol: Protocol,
+        protocol: Optional[Protocol] = None,
         duration: float = 2.0,
         min_duration: float = None,
         batch_size: int = 32,
@@ -185,7 +186,8 @@ class Task(pl.LightningDataModule):
         super().__init__()
 
         # dataset
-        self.protocol = check_protocol(protocol)
+        if protocol is not None:
+            self.protocol = check_protocol(protocol)
 
         # batching
         self.duration = duration
