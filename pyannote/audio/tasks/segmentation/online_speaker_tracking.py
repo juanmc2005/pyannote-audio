@@ -69,7 +69,7 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
     augmentation : BaseWaveformTransform, optional
         torch_audiomentations waveform transform, used by dataloader
         during training.
-    speakers : int, optional
+    max_speakers : int, optional
         Maximum number of speakers per conversation. Defaults to 20.
     sample_rate : int, optional
         The sample rate of the audio stream. Defaults to 16000.
@@ -86,7 +86,7 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
         optimizer: Callable[[Iterable[Parameter]], Optimizer] = None,
         learning_rate: float = 1e-3,
         augmentation: BaseWaveformTransform = None,
-        speakers: int = 20,
+        max_speakers: int = 20,
         sample_rate: int = 16000,
     ):
 
@@ -109,8 +109,7 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
         self.chunk_size: int = round(duration * sample_rate)
         # Step size corresponding to the sliding window of the stream
         # Only 50% of the chunk duration is currently supported
-        step = duration / 2
-        self.step_size: int = round(step * sample_rate)
+        self.step_size: int = round(0.5 * duration * sample_rate)
 
         # Task specification does not depend
         # on the data: we set an upper bound on
@@ -119,7 +118,7 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
             problem=Problem.MULTI_LABEL_CLASSIFICATION,
             resolution=Resolution.FRAME,
             duration=self.duration,
-            classes=[f"speaker_{i+1}" for i in range(speakers)],
+            classes=[f"speaker_{i+1}" for i in range(max_speakers)],
         )
 
     @property
@@ -128,8 +127,10 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
 
     def update_database(self, chunk: torch.Tensor, scores: SlidingWindowFeature):
         # TODO save some chunks for validation
-        replace = self._past_waveform is None or self._past_scores is None
-        if replace:
+        assert chunk.dim == 2
+        assert scores.data.ndim == 2
+        assert scores.data.shape[1] == len(self.specifications.classes)
+        if self._past_waveform is None or self._past_scores is None:
             self._past_waveform = chunk
             self._past_scores = scores
         else:
@@ -149,9 +150,9 @@ class OnlineSpeakerTracking(SegmentationTaskMixin, Task):
             overlap_frames = current_scores.shape[0] - start_frame
             # The new score for the overlapping half chunk is the mean between old and new
             # scores.data has shape (chunk_frames, speakers)
-            current_scores[start_frame:] = (
+            current_scores[start_frame:] = 0.5 * (
                 current_scores[start_frame:] + scores.data[:overlap_frames]
-            ) / 2
+            )
             # The remaining scores are appended
             current_scores = np.vstack([current_scores, scores.data[overlap_frames:]])
             self._past_scores = SlidingWindowFeature(
